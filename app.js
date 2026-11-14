@@ -4,6 +4,9 @@
   const $ = (selector) => document.querySelector(selector);
   const elements = {
     fileInput: $("#file-input"),
+    folderInput: $("#folder-input"),
+    browseFiles: $("#browse-files"),
+    browseFolder: $("#browse-folder"),
     dropzone: $("#dropzone"),
     trackList: $("#track-list"),
     emptyNote: $("#empty-note"),
@@ -403,8 +406,9 @@
       showStatus("Choose audio files such as MP3, WAV, M4A, OGG, or FLAC.", true);
       return;
     }
-    const existing = new Set(state.tracks.map((track) => `${track.name}:${track.size}`));
-    const candidates = audioFiles.filter((file) => !existing.has(`${file.name}:${file.size}`));
+    const fileIdentity = (file) => `${file.webkitRelativePath || file.name}:${file.size}`;
+    const existing = new Set(state.tracks.map((track) => `${track.sourcePath}:${track.size}`));
+    const candidates = audioFiles.filter((file) => !existing.has(fileIdentity(file)));
     if (!candidates.length) {
       showStatus("Those tracks are already in your crate.", true);
       return;
@@ -412,6 +416,7 @@
     stopPlayback();
     showStatus(`Analyzing ${candidates.length} ${candidates.length === 1 ? "track" : "tracks"} in your browser…`);
     elements.fileInput.disabled = true;
+    elements.folderInput.disabled = true;
     try {
       const context = getAudioContext();
       for (const file of candidates) {
@@ -430,6 +435,7 @@
         state.tracks.push({
           id: crypto.randomUUID(),
           name: file.name.replace(/\.[^.]+$/, ""),
+          sourcePath: file.webkitRelativePath || file.name,
           size: file.size,
           buffer,
           duration: buffer.duration,
@@ -445,7 +451,9 @@
       updateMix();
     } finally {
       elements.fileInput.disabled = false;
+      elements.folderInput.disabled = false;
       elements.fileInput.value = "";
+      elements.folderInput.value = "";
     }
   }
 
@@ -860,6 +868,9 @@
   }
 
   elements.fileInput.addEventListener("change", (event) => addFiles(event.target.files));
+  elements.folderInput.addEventListener("change", (event) => addFiles(event.target.files));
+  elements.browseFiles.addEventListener("click", () => elements.fileInput.click());
+  elements.browseFolder.addEventListener("click", () => elements.folderInput.click());
   elements.dropzone.addEventListener("dragover", (event) => {
     event.preventDefault();
     elements.dropzone.classList.add("drag-over");
