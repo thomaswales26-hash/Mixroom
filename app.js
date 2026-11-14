@@ -228,7 +228,7 @@
       name.textContent = track.name;
       const sub = document.createElement("span");
       sub.className = "track-sub";
-      sub.textContent = `TRACK ${String(index + 1).padStart(2, "0")} · ${formatTime(track.duration)}`;
+      sub.textContent = `TRACK ${String(index + 1).padStart(2, "0")} · ${formatTime(track.duration)} · CUE ${formatTime(track.cuePoint)}`;
       info.append(name, sub);
       const metrics = document.createElement("span");
       metrics.className = "track-metrics";
@@ -386,6 +386,55 @@
     return samples;
   }
 
+  function detectCuePoint(samples, sampleRate, bpm, beatOffset) {
+    const frameDuration = 0.05;
+    const frameSize = Math.max(1, Math.floor(sampleRate * frameDuration));
+    const frameCount = Math.floor(samples.length / frameSize);
+    if (!frameCount) return 0;
+    const energy = new Float64Array(frameCount);
+    let maximum = 0;
+
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const start = frame * frameSize;
+      const end = Math.min(start + frameSize, samples.length);
+      let sum = 0;
+      for (let index = start; index < end; index += 1) sum += samples[index] * samples[index];
+      energy[frame] = Math.sqrt(sum / (end - start));
+      maximum = Math.max(maximum, energy[frame]);
+    }
+
+    if (maximum < 0.0001) return 0;
+
+    if (bpm && beatOffset !== null) {
+      const beatPeriod = 60 / bpm;
+      const beatCount = Math.floor((samples.length / sampleRate - beatOffset) / beatPeriod);
+      const beatEnergy = new Float64Array(Math.max(0, beatCount));
+      const windowFrames = Math.max(1, Math.ceil(0.08 / frameDuration));
+      let maximumBeatEnergy = 0;
+
+      for (let beat = 0; beat < beatCount; beat += 1) {
+        const time = beatOffset + beat * beatPeriod;
+        const frame = Math.floor(time / frameDuration);
+        const end = Math.min(frame + windowFrames, frameCount);
+        let total = 0;
+        for (let current = frame; current < end; current += 1) total += energy[current];
+        beatEnergy[beat] = total / Math.max(1, end - frame);
+        maximumBeatEnergy = Math.max(maximumBeatEnergy, beatEnergy[beat]);
+      }
+
+      if (maximumBeatEnergy >= 0.0001) {
+        const threshold = maximumBeatEnergy * 0.2;
+        for (let beat = 0; beat < beatEnergy.length; beat += 1) {
+          if (beatEnergy[beat] >= threshold) return beatOffset + beat * beatPeriod;
+        }
+      }
+    }
+
+    const threshold = maximum * 0.18;
+    for (let frame = 0; frame < frameCount; frame += 1) if (energy[frame] >= threshold) return frame * frameDuration;
+    return 0;
+  }
+
   function estimateBpm(samples, sampleRate) {
     const frameSize = Math.max(1, Math.floor(sampleRate * 0.05));
     const frameCount = Math.min(1800, Math.floor(samples.length / frameSize));
@@ -534,6 +583,7 @@
           const arrayBuffer = await file.arrayBuffer();
           const buffer = await context.decodeAudioData(arrayBuffer);
           const analysisSamples = createAnalysisSamples(buffer);
+          const tempo = estimateBpm(analysisSamples, ANALYSIS_SAMPLE_RATE);
           state.tracks.push({
             id: crypto.randomUUID(),
             name: file.name.replace(/\.[^.]+$/, ""),
@@ -541,7 +591,8 @@
             size: file.size,
             buffer,
             duration: buffer.duration,
-            ...estimateBpm(analysisSamples, ANALYSIS_SAMPLE_RATE),
+            ...tempo,
+            cuePoint: detectCuePoint(analysisSamples, ANALYSIS_SAMPLE_RATE, tempo.bpm, tempo.beatOffset),
             key: estimateKey(analysisSamples, ANALYSIS_SAMPLE_RATE),
             color: COLORS[state.tracks.length % COLORS.length],
           });
@@ -891,6 +942,22 @@
         context.globalAlpha = 0.42 + Math.min(peak, 0.6) * 0.48;
         context.fillRect(start + pixel, (height - barHeight) / 2, Math.max(1, width / pixels * 0.57), barHeight);
       }
+    });
+    state.tracks.forEach((track, trackIndex) => {
+      const timing = state.timings[trackIndex];
+      if (track.cuePoint < timing.sourceOffset) return;
+      const cueTime = state.offsets[trackIndex] + (track.cuePoint - timing.sourceOffset) / timing.rate;
+      if (cueTime < state.offsets[trackIndex] || cueTime > state.offsets[trackIndex] + timing.playedDuration) return;
+      const x = (cueTime / total) * width;
+      context.globalAlpha = 1;
+      context.fillStyle = "#e8f39c";
+      context.fillRect(x - 1, 0, 2, height);
+      context.beginPath();
+      context.moveTo(x - 4, 1);
+      context.lineTo(x + 4, 1);
+      context.lineTo(x, 6);
+      context.closePath();
+      context.fill();
     });
     context.globalAlpha = 1;
   }
