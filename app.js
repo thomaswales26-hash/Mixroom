@@ -52,7 +52,7 @@
   const ANALYSIS_MAX_SECONDS = 30;
   const MAX_TRACK_DURATION_SECONDS = 30 * 60;
   const MAX_TOTAL_DECODED_BYTES = 4 * 1024 * 1024 * 1024;
-  const MAX_EXPORT_DURATION_SECONDS = 20 * 60;
+  const MAX_BUFFERED_EXPORT_BYTES = 512 * 1024 * 1024;
   const KEY_PROFILES = {
     major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
     minor: [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
@@ -64,6 +64,7 @@
     sources: [],
     playing: false,
     paused: false,
+    exporting: false,
     startedAt: 0,
     startedPosition: 0,
     position: 0,
@@ -272,7 +273,7 @@
   }
 
   function moveTrack(fromId, toId) {
-    if (!fromId || fromId === toId) return;
+    if (state.exporting || !fromId || fromId === toId) return;
     const from = state.tracks.findIndex((track) => track.id === fromId);
     const to = state.tracks.findIndex((track) => track.id === toId);
     if (from < 0 || to < 0) return;
@@ -283,6 +284,7 @@
   }
 
   function removeTrack(id) {
+    if (state.exporting) return;
     stopPlayback();
     state.tracks = state.tracks.filter((track) => track.id !== id);
     updateMix();
@@ -583,6 +585,7 @@
   }
 
   async function addFiles(files, source = "file") {
+    if (state.exporting) return;
     const report = source === "folder" ? showImportStatus : showStatus;
     const audioFiles = Array.from(files).filter(isAudioFile);
     if (!audioFiles.length) {
@@ -792,7 +795,7 @@
   }
 
   async function arrangeTracks() {
-    if (state.tracks.length < 2) return;
+    if (state.exporting || state.tracks.length < 2) return;
     elements.arrange.disabled = true;
     const label = elements.arrange.querySelector("span:nth-child(2)");
     label.textContent = elements.token.value.trim() ? "Asking your model…" : "Finding the flow…";
@@ -1033,15 +1036,9 @@
     }
   }
 
-  async function writeWav(buffer, onProgress) {
-    const channels = 2;
-    const sampleRate = buffer.sampleRate;
-    const frames = buffer.length;
-    const bytesPerSample = 2;
-    const dataSize = frames * channels * bytesPerSample;
-    const array = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(array);
-    const samples = new Int16Array(array, 44);
+  function createWavHeader(dataSize, sampleRate) {
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
     const writeString = (offset, value) => {
       for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i));
     };
@@ -1051,52 +1048,144 @@
     writeString(12, "fmt ");
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
-    view.setUint16(22, channels, true);
+    view.setUint16(22, 2, true);
     view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * channels * bytesPerSample, true);
-    view.setUint16(32, channels * bytesPerSample, true);
-    view.setUint16(34, bytesPerSample * 8, true);
+    view.setUint32(28, sampleRate * 4, true);
+    view.setUint16(32, 4, true);
+    view.setUint16(34, 16, true);
     writeString(36, "data");
     view.setUint32(40, dataSize, true);
-    const left = buffer.getChannelData(0);
-    const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left;
-    const chunkSize = 1_048_576;
-    for (let start = 0; start < frames; start += chunkSize) {
-      const end = Math.min(start + chunkSize, frames);
-      for (let i = start; i < end; i += 1) {
-        const l = Math.max(-1, Math.min(1, left[i]));
-        const r = Math.max(-1, Math.min(1, right[i]));
-        samples[i * 2] = l < 0 ? l * 0x8000 : l * 0x7fff;
-        samples[i * 2 + 1] = r < 0 ? r * 0x8000 : r * 0x7fff;
-      }
-      onProgress(end / frames);
-      if (end < frames) await new Promise((resolve) => setTimeout(resolve, 0));
+    return header;
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = "";
+    const stride = 0x8000;
+    for (let start = 0; start < bytes.length; start += stride) {
+      binary += String.fromCharCode(...bytes.subarray(start, Math.min(start + stride, bytes.length)));
     }
-    return new Blob([array], { type: "audio/wav" });
+    return btoa(binary);
+  }
+
+  async function renderMixToWav(onProgress) {
+    const sampleRate = 44100;
+    const frames = Math.ceil(state.duration * sampleRate);
+    const dataSize = frames * 4;
+    if (dataSize > 0xffffffff - 36) {
+      throw new Error("This mix is too long for the WAV format. Shorten it to under 6 hours and 45 minutes.");
+    }
+
+    const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OfflineContext) throw new Error("WAV export is not supported by this browser.");
+    const header = new Uint8Array(createWavHeader(dataSize, sampleRate));
+    const nativeExport = window.webkit?.messageHandlers?.mixroomExport;
+    const native = typeof nativeExport?.postMessage === "function";
+    let writable = null;
+    let parts = null;
+    const canPickSaveFile = !native && typeof window.showSaveFilePicker === "function";
+    if (!native && !canPickSaveFile) {
+      if (dataSize > MAX_BUFFERED_EXPORT_BYTES) {
+        throw new Error("This browser cannot save a mix over 512 MiB directly. Use the Mixroom Mac app or a browser with file-save support.");
+      }
+      parts = [header];
+    }
+    const chunkFrames = sampleRate * 10;
+    let renderedFrames = 0;
+    try {
+      if (canPickSaveFile) {
+        const fileHandle = await window.showSaveFilePicker({
+          suggestedName: `mixroom-set-${new Date().toISOString().slice(0, 10)}.wav`,
+          types: [{ description: "WAV audio", accept: { "audio/wav": [".wav"] } }],
+        });
+        writable = await fileHandle.createWritable();
+        await writable.write(header);
+      }
+      if (native) {
+        await nativeExport.postMessage({
+          type: "start",
+          header: bytesToBase64(header),
+          fileName: `mixroom-set-${new Date().toISOString().slice(0, 10)}.wav`,
+        });
+      }
+      while (renderedFrames < frames) {
+        const currentFrames = Math.min(chunkFrames, frames - renderedFrames);
+        const position = renderedFrames / sampleRate;
+        const offline = new OfflineContext(2, currentFrames, sampleRate);
+        scheduleMix(offline, offline.destination, 0.94, position, 0);
+        const rendered = await offline.startRendering();
+        const left = rendered.getChannelData(0);
+        const right = rendered.getChannelData(1);
+        const pcm = new Int16Array(currentFrames * 2);
+        for (let frame = 0; frame < currentFrames; frame += 1) {
+          const l = Math.max(-1, Math.min(1, left[frame]));
+          const r = Math.max(-1, Math.min(1, right[frame]));
+          pcm[frame * 2] = l < 0 ? l * 0x8000 : l * 0x7fff;
+          pcm[frame * 2 + 1] = r < 0 ? r * 0x8000 : r * 0x7fff;
+        }
+        const chunk = new Uint8Array(pcm.buffer);
+        if (native) {
+          await nativeExport.postMessage({ type: "chunk", data: bytesToBase64(chunk) });
+        } else if (writable) {
+          await writable.write(chunk);
+        } else {
+          parts.push(chunk);
+        }
+        renderedFrames += currentFrames;
+        onProgress(renderedFrames / frames);
+      }
+      if (native) {
+        await nativeExport.postMessage({ type: "finish" });
+        return { native: true };
+      }
+      if (writable) {
+        await writable.close();
+        return { native: false, savedDirectly: true };
+      }
+      return { native: false, blob: new Blob(parts, { type: "audio/wav" }) };
+    } catch (error) {
+      if (native) {
+        try { await nativeExport.postMessage({ type: "abort" }); } catch { /* Preserve the original export error. */ }
+      }
+      if (writable) {
+        try { await writable.abort(); } catch { /* Preserve the original export error. */ }
+      }
+      throw error;
+    }
   }
 
   async function exportMix() {
     if (!state.tracks.length || state.duration <= 0) return;
-    if (state.duration > MAX_EXPORT_DURATION_SECONDS) {
-      showStatus("WAV export is limited to 20 minutes to protect your Mac's memory. Shorten the mix and try again.", true);
-      return;
-    }
+    state.exporting = true;
     elements.export.disabled = true;
+    [
+      elements.fileInput,
+      elements.folderInput,
+      elements.browseFiles,
+      elements.browseFolder,
+      elements.clear,
+      elements.crossfade,
+      elements.beatAlign,
+      elements.arrange,
+      elements.folderImportConfirm,
+      elements.folderSelectAll,
+    ].forEach((element) => { element.disabled = true; });
+    elements.trackList.querySelectorAll("button").forEach((button) => { button.disabled = true; });
     const label = elements.export.innerHTML;
     elements.export.textContent = "Rendering…";
-    showStatus("Rendering audio at 44.1 kHz…");
+    showStatus(`Rendering full mix · ${formatTime(state.duration)} at 44.1 kHz…`);
     try {
-      const sampleRate = 44100;
-      const length = Math.ceil(state.duration * sampleRate);
-      const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-      if (!OfflineContext) throw new Error("WAV export is not supported by this browser.");
-      const offline = new OfflineContext(2, length, sampleRate);
-      scheduleMix(offline, offline.destination, 0.94, 0, 0);
-      const rendered = await offline.startRendering();
-      showStatus("Audio rendered. Preparing WAV…");
-      const blob = await writeWav(rendered, (progress) => {
-        showStatus(`Preparing WAV · ${Math.round(progress * 100)}%`);
+      const result = await renderMixToWav((progress) => {
+        showStatus(`Rendering full mix · ${Math.round(progress * 100)}%`);
       });
+      if (result.native) {
+        showStatus("Full mix saved to your Documents folder.");
+        return;
+      }
+      if (result.savedDirectly) {
+        showStatus("Full mix saved to the selected file.");
+        return;
+      }
+      const blob = result.blob;
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -1107,7 +1196,8 @@
     } catch (error) {
       showStatus(error.message || "Could not render the WAV. Try a shorter set or another browser.", true);
     } finally {
-      elements.export.disabled = state.tracks.length === 0;
+      state.exporting = false;
+      updateMix();
       elements.export.innerHTML = label;
     }
   }
