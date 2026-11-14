@@ -51,7 +51,7 @@
   const ANALYSIS_SAMPLE_RATE = 11025;
   const ANALYSIS_MAX_SECONDS = 30;
   const MAX_TRACK_DURATION_SECONDS = 30 * 60;
-  const MAX_TOTAL_DECODED_BYTES = 1024 * 1024 * 1024;
+  const MAX_TOTAL_DECODED_BYTES = 4 * 1024 * 1024 * 1024;
   const MAX_EXPORT_DURATION_SECONDS = 20 * 60;
   const KEY_PROFILES = {
     major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
@@ -621,14 +621,14 @@
           const estimatedBytes = duration * context.sampleRate * 2 * Float32Array.BYTES_PER_ELEMENT;
           const availableBytes = MAX_TOTAL_DECODED_BYTES - state.tracks.reduce((total, track) => total + getDecodedAudioBytes(track), 0);
           if (estimatedBytes > availableBytes) {
-            skipped.push({ name: file.name, reason: "would exceed the 1 GiB decoded-audio limit" });
+            skipped.push({ name: file.name, reason: "would exceed the 4 GiB decoded-audio limit" });
             continue;
           }
           const arrayBuffer = await file.arrayBuffer();
           const buffer = await context.decodeAudioData(arrayBuffer);
           const decodedBytes = buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
           if (decodedBytes > availableBytes) {
-            skipped.push({ name: file.name, reason: "would exceed the 1 GiB decoded-audio limit" });
+            skipped.push({ name: file.name, reason: "would exceed the 4 GiB decoded-audio limit" });
             continue;
           }
           const analysisSamples = createAnalysisSamples(buffer);
