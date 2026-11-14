@@ -48,6 +48,8 @@
   };
   const COLORS = ["#d0e87a", "#e7a477", "#9dace4", "#d39ad0", "#79c6b6", "#e8c66d", "#8cb7d8"];
   const NOTE_NAMES = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+  const ANALYSIS_SAMPLE_RATE = 11025;
+  const ANALYSIS_MAX_SECONDS = 30;
   const KEY_PROFILES = {
     major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
     minor: [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
@@ -358,6 +360,32 @@
     return key;
   }
 
+  function createAnalysisSamples(buffer) {
+    const step = buffer.sampleRate / ANALYSIS_SAMPLE_RATE;
+    const frameCount = Math.min(
+      Math.floor(buffer.length / step),
+      Math.floor(ANALYSIS_MAX_SECONDS * ANALYSIS_SAMPLE_RATE),
+    );
+    const samples = new Float32Array(frameCount);
+    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const start = Math.floor(frame * step);
+      const end = Math.min(buffer.length, Math.max(start + 1, Math.floor((frame + 1) * step)));
+      let sum = 0;
+      let count = 0;
+      for (const channel of channels) {
+        for (let sample = start; sample < end; sample += 1) {
+          sum += channel[sample];
+          count += 1;
+        }
+      }
+      samples[frame] = sum / count;
+    }
+
+    return samples;
+  }
+
   function estimateBpm(samples, sampleRate) {
     const frameSize = Math.max(1, Math.floor(sampleRate * 0.05));
     const frameCount = Math.min(1800, Math.floor(samples.length / frameSize));
@@ -505,11 +533,7 @@
         try {
           const arrayBuffer = await file.arrayBuffer();
           const buffer = await context.decodeAudioData(arrayBuffer);
-          const mono = new Float32Array(buffer.length);
-          for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-            const data = buffer.getChannelData(channel);
-            for (let i = 0; i < data.length; i += 1) mono[i] += data[i] / buffer.numberOfChannels;
-          }
+          const analysisSamples = createAnalysisSamples(buffer);
           state.tracks.push({
             id: crypto.randomUUID(),
             name: file.name.replace(/\.[^.]+$/, ""),
@@ -517,8 +541,8 @@
             size: file.size,
             buffer,
             duration: buffer.duration,
-            ...estimateBpm(mono, buffer.sampleRate),
-            key: estimateKey(mono, buffer.sampleRate),
+            ...estimateBpm(analysisSamples, ANALYSIS_SAMPLE_RATE),
+            key: estimateKey(analysisSamples, ANALYSIS_SAMPLE_RATE),
             color: COLORS[state.tracks.length % COLORS.length],
           });
         } catch {
