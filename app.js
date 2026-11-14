@@ -871,7 +871,7 @@
     }
   }
 
-  function writeWav(buffer) {
+  async function writeWav(buffer, onProgress) {
     const channels = 2;
     const sampleRate = buffer.sampleRate;
     const frames = buffer.length;
@@ -879,6 +879,7 @@
     const dataSize = frames * channels * bytesPerSample;
     const array = new ArrayBuffer(44 + dataSize);
     const view = new DataView(array);
+    const samples = new Int16Array(array, 44);
     const writeString = (offset, value) => {
       for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i));
     };
@@ -897,13 +898,17 @@
     view.setUint32(40, dataSize, true);
     const left = buffer.getChannelData(0);
     const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left;
-    let offset = 44;
-    for (let i = 0; i < frames; i += 1) {
-      const l = Math.max(-1, Math.min(1, left[i]));
-      const r = Math.max(-1, Math.min(1, right[i]));
-      view.setInt16(offset, l < 0 ? l * 0x8000 : l * 0x7fff, true);
-      view.setInt16(offset + 2, r < 0 ? r * 0x8000 : r * 0x7fff, true);
-      offset += 4;
+    const chunkSize = 1_048_576;
+    for (let start = 0; start < frames; start += chunkSize) {
+      const end = Math.min(start + chunkSize, frames);
+      for (let i = start; i < end; i += 1) {
+        const l = Math.max(-1, Math.min(1, left[i]));
+        const r = Math.max(-1, Math.min(1, right[i]));
+        samples[i * 2] = l < 0 ? l * 0x8000 : l * 0x7fff;
+        samples[i * 2 + 1] = r < 0 ? r * 0x8000 : r * 0x7fff;
+      }
+      onProgress(end / frames);
+      if (end < frames) await new Promise((resolve) => setTimeout(resolve, 0));
     }
     return new Blob([array], { type: "audio/wav" });
   }
@@ -913,7 +918,7 @@
     elements.export.disabled = true;
     const label = elements.export.innerHTML;
     elements.export.textContent = "Rendering…";
-    showStatus("Rendering your mix to WAV. Longer sets may take a little while…");
+    showStatus("Rendering audio at 44.1 kHz…");
     try {
       const sampleRate = 44100;
       const length = Math.ceil(state.duration * sampleRate);
@@ -922,7 +927,10 @@
       const offline = new OfflineContext(2, length, sampleRate);
       scheduleMix(offline, offline.destination, 0.94, 0, 0);
       const rendered = await offline.startRendering();
-      const blob = writeWav(rendered);
+      showStatus("Audio rendered. Preparing WAV…");
+      const blob = await writeWav(rendered, (progress) => {
+        showStatus(`Preparing WAV · ${Math.round(progress * 100)}%`);
+      });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
