@@ -93,6 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
     }
 
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        let alert = NSAlert()
+        alert.messageText = "Mixroom's audio page stopped."
+        alert.informativeText = "It may have run out of memory. The page restarted, so imported tracks were cleared. Import fewer or shorter tracks, and keep WAV exports under 20 minutes."
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
     func webView(
         _ webView: WKWebView,
         navigationAction: WKNavigationAction,

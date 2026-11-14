@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/.build/macos"
 APP="$BUILD/Mixroom.app"
 STAGE="$BUILD/pkgroot"
-VERSION="1.0.10"
+VERSION="1.0.11"
 
 rm -rf "$APP" "$STAGE" "$BUILD/Mixroom-arm64" "$BUILD/Mixroom-x86_64"
 mkdir -p "$BUILD" "$APP/Contents/MacOS" "$APP/Contents/Resources/Web"

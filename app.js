@@ -50,6 +50,9 @@
   const NOTE_NAMES = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
   const ANALYSIS_SAMPLE_RATE = 11025;
   const ANALYSIS_MAX_SECONDS = 30;
+  const MAX_TRACK_DURATION_SECONDS = 30 * 60;
+  const MAX_TOTAL_DECODED_BYTES = 1024 * 1024 * 1024;
+  const MAX_EXPORT_DURATION_SECONDS = 20 * 60;
   const KEY_PROFILES = {
     major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
     minor: [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
@@ -501,6 +504,32 @@
     return file.type.startsWith("audio/") || /\.(mp3|wav|wave|m4a|aac|ogg|oga|flac|opus|aif|aiff|alac|caf)$/i.test(file.name);
   }
 
+  function getMediaDuration(file) {
+    return new Promise((resolve) => {
+      const audio = document.createElement("audio");
+      const url = URL.createObjectURL(file);
+      let settled = false;
+      const timeout = setTimeout(() => finish(null), 3000);
+      const finish = (duration) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        audio.removeAttribute("src");
+        audio.load();
+        URL.revokeObjectURL(url);
+        resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+      };
+      audio.preload = "metadata";
+      audio.addEventListener("loadedmetadata", () => finish(audio.duration), { once: true });
+      audio.addEventListener("error", () => finish(null), { once: true });
+      audio.src = url;
+    });
+  }
+
+  function getDecodedAudioBytes(track) {
+    return track.buffer.length * track.buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
+  }
+
   function updateFolderSelection() {
     const checkboxes = Array.from(elements.folderBrowserList.querySelectorAll('input[type="checkbox"]'));
     const selected = checkboxes.filter((checkbox) => checkbox.checked);
@@ -575,13 +604,33 @@
     elements.folderInput.disabled = true;
     try {
       const context = getAudioContext();
-      const failures = [];
+      const skipped = [];
       for (const [index, file] of candidates.entries()) {
         report(`Analyzing track ${index + 1} of ${candidates.length}: ${file.name}`);
         await new Promise((resolve) => setTimeout(resolve, 0));
         try {
+          const duration = await getMediaDuration(file);
+          if (!duration) {
+            skipped.push({ name: file.name, reason: "could not safely estimate its duration" });
+            continue;
+          }
+          if (duration > MAX_TRACK_DURATION_SECONDS) {
+            skipped.push({ name: file.name, reason: "is longer than the 30-minute track limit" });
+            continue;
+          }
+          const estimatedBytes = duration * context.sampleRate * 2 * Float32Array.BYTES_PER_ELEMENT;
+          const availableBytes = MAX_TOTAL_DECODED_BYTES - state.tracks.reduce((total, track) => total + getDecodedAudioBytes(track), 0);
+          if (estimatedBytes > availableBytes) {
+            skipped.push({ name: file.name, reason: "would exceed the 1 GiB decoded-audio limit" });
+            continue;
+          }
           const arrayBuffer = await file.arrayBuffer();
           const buffer = await context.decodeAudioData(arrayBuffer);
+          const decodedBytes = buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
+          if (decodedBytes > availableBytes) {
+            skipped.push({ name: file.name, reason: "would exceed the 1 GiB decoded-audio limit" });
+            continue;
+          }
           const analysisSamples = createAnalysisSamples(buffer);
           const tempo = estimateBpm(analysisSamples, ANALYSIS_SAMPLE_RATE);
           state.tracks.push({
@@ -597,13 +646,13 @@
             color: COLORS[state.tracks.length % COLORS.length],
           });
         } catch {
-          failures.push(file.name);
+          skipped.push({ name: file.name, reason: "could not be read" });
         }
       }
-      if (failures.length) {
-        const names = failures.slice(0, 3).join(", ");
-        const more = failures.length > 3 ? ` and ${failures.length - 3} more` : "";
-        report(`Added ${candidates.length - failures.length} of ${candidates.length} tracks. Could not read: ${names}${more}.`, true);
+      if (skipped.length) {
+        const details = skipped.slice(0, 3).map(({ name, reason }) => `${name} (${reason})`).join("; ");
+        const more = skipped.length > 3 ? `; and ${skipped.length - 3} more` : "";
+        report(`Added ${candidates.length - skipped.length} of ${candidates.length} tracks. Skipped: ${details}${more}.`, true);
       } else {
         report(`Added ${candidates.length} ${candidates.length === 1 ? "track" : "tracks"} to your crate.`);
       }
@@ -1028,6 +1077,10 @@
 
   async function exportMix() {
     if (!state.tracks.length || state.duration <= 0) return;
+    if (state.duration > MAX_EXPORT_DURATION_SECONDS) {
+      showStatus("WAV export is limited to 20 minutes to protect your Mac's memory. Shorten the mix and try again.", true);
+      return;
+    }
     elements.export.disabled = true;
     const label = elements.export.innerHTML;
     elements.export.textContent = "Rendering…";
