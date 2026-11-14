@@ -64,9 +64,11 @@
             <input id="file-input" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" multiple>
             <input id="folder-input" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" webkitdirectory directory multiple>
             <span class="upload-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M5 14.5v4A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-4"/></svg></span>
-            <span class="drop-copy"><strong>Drop your tracks here</strong><span>or <button class="inline-browse" id="browse-files" type="button">browse files</button> from your device</span></span>
-            <span class="file-note">MP3, WAV, M4A, FLAC &amp; more</span>
-            <button class="folder-button" id="browse-folder" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg> Import folder</button>
+            <span class="drop-copy"><strong>Drop your tracks here</strong><span>MP3, WAV, M4A, FLAC &amp; more</span></span>
+            <div class="import-actions">
+              <button class="browse-files-button" id="browse-files" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M5 14.5v4A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-4"/></svg> Browse files</button>
+              <button class="folder-button" id="browse-folder" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg> Import from folder</button>
+            </div>
           </div>
 
           <div class="track-list" id="track-list" aria-live="polite"></div>

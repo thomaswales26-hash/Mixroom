@@ -20,7 +20,7 @@ On macOS with the Xcode Command Line Tools installed, run:
 ./scripts/build-macos.sh
 ```
 
-This builds a universal Apple Silicon and Intel `Mixroom.app` and creates `Mixroom-1.0.2-macOS.pkg` in the project directory. Install the package to add Mixroom to `/Applications`. The app is ad-hoc signed; the installer is unsigned, and neither is Developer ID signed or notarized. macOS may require you to confirm or override its security warning before installation or first launch.
+This builds a universal Apple Silicon and Intel `Mixroom.app` and creates `Mixroom-1.0.3-macOS.pkg` in the project directory. Install the package to add Mixroom to `/Applications`. The app is ad-hoc signed; the installer is unsigned, and neither is Developer ID signed or notarized. macOS may require you to confirm or override its security warning before installation or first launch.
 
 Prebuilt installers are available on the [GitHub Releases page](https://github.com/thomaswales26-hash/Mixroom/releases).
 
@@ -33,7 +33,7 @@ Online model availability, access, and usage limits depend on your Hugging Face 
 ## Notes
 
 - Drag tracks to set the order manually; crossfade length and listening direction are adjustable.
-- Use **Import folder** to add supported audio tracks from a folder, or browse for individual files.
+- Use **Import from folder** to add supported audio tracks from a folder, or **Browse files** to choose individual files.
 - Beat alignment is enabled by default. Mixroom estimates each track's tempo and beat phase locally, adjusts playback rate to a shared median tempo (limited to 0.8×–1.25×), trims the lead-in to the first detected beat, and starts transitions on beat boundaries. Playback rate changes also shift pitch; disable Beat align to preserve original speed and pitch.
 - Playback and WAV export use the same linear-amplitude crossfade schedule. Export is stereo 16-bit PCM at 44.1 kHz.
 - Tempo, beat phase, and key estimates are approximate analysis aids, not guaranteed musical transcriptions. Tracks without a reliable beat estimate play at their original speed and use regular crossfades.
