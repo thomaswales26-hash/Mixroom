@@ -400,10 +400,12 @@
     return { bpm: bestBpm, beatOffset };
   }
 
-  async function addFiles(files) {
-    const audioFiles = Array.from(files).filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(file.name));
+  async function addFiles(files, source = "file") {
+    const audioFiles = Array.from(files).filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|wave|m4a|aac|ogg|oga|flac|opus|aif|aiff|alac|caf)$/i.test(file.name));
     if (!audioFiles.length) {
-      showStatus("Choose audio files such as MP3, WAV, M4A, OGG, or FLAC.", true);
+      showStatus(source === "folder"
+        ? "No supported audio tracks found in that folder."
+        : "Choose audio files such as MP3, WAV, M4A, OGG, or FLAC.", true);
       return;
     }
     const fileIdentity = (file) => `${file.webkitRelativePath || file.name}:${file.size}`;
@@ -419,32 +421,38 @@
     elements.folderInput.disabled = true;
     try {
       const context = getAudioContext();
+      const failures = [];
       for (const file of candidates) {
-        const arrayBuffer = await file.arrayBuffer();
-        let buffer;
         try {
-          buffer = await context.decodeAudioData(arrayBuffer);
+          const arrayBuffer = await file.arrayBuffer();
+          const buffer = await context.decodeAudioData(arrayBuffer);
+          const mono = new Float32Array(buffer.length);
+          for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+            const data = buffer.getChannelData(channel);
+            for (let i = 0; i < data.length; i += 1) mono[i] += data[i] / buffer.numberOfChannels;
+          }
+          state.tracks.push({
+            id: crypto.randomUUID(),
+            name: file.name.replace(/\.[^.]+$/, ""),
+            sourcePath: file.webkitRelativePath || file.name,
+            size: file.size,
+            buffer,
+            duration: buffer.duration,
+            ...estimateBpm(mono, buffer.sampleRate),
+            key: estimateKey(mono, buffer.sampleRate),
+            color: COLORS[state.tracks.length % COLORS.length],
+          });
         } catch {
-          throw new Error(`Could not decode “${file.name}”. Try converting it to MP3 or WAV.`);
+          failures.push(file.name);
         }
-        const mono = new Float32Array(buffer.length);
-        for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-          const data = buffer.getChannelData(channel);
-          for (let i = 0; i < data.length; i += 1) mono[i] += data[i] / buffer.numberOfChannels;
-        }
-        state.tracks.push({
-          id: crypto.randomUUID(),
-          name: file.name.replace(/\.[^.]+$/, ""),
-          sourcePath: file.webkitRelativePath || file.name,
-          size: file.size,
-          buffer,
-          duration: buffer.duration,
-          ...estimateBpm(mono, buffer.sampleRate),
-          key: estimateKey(mono, buffer.sampleRate),
-          color: COLORS[state.tracks.length % COLORS.length],
-        });
       }
-      showStatus("");
+      if (failures.length) {
+        const names = failures.slice(0, 3).join(", ");
+        const more = failures.length > 3 ? ` and ${failures.length - 3} more` : "";
+        showStatus(`Imported ${candidates.length - failures.length} of ${candidates.length} tracks. Could not read: ${names}${more}.`, true);
+      } else {
+        showStatus(`Imported ${candidates.length} ${candidates.length === 1 ? "track" : "tracks"} successfully.`);
+      }
       updateMix();
     } catch (error) {
       showStatus(error.message || "Something went wrong while loading your tracks.", true);
@@ -868,7 +876,7 @@
   }
 
   elements.fileInput.addEventListener("change", (event) => addFiles(event.target.files));
-  elements.folderInput.addEventListener("change", (event) => addFiles(event.target.files));
+  elements.folderInput.addEventListener("change", (event) => addFiles(event.target.files, "folder"));
   elements.browseFiles.addEventListener("click", () => elements.fileInput.click());
   elements.browseFolder.addEventListener("click", () => elements.folderInput.click());
   elements.dropzone.addEventListener("dragover", (event) => {

@@ -42,16 +42,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
         completionHandler: @escaping ([URL]?) -> Void
     ) {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = true
+        panel.canChooseFiles = !parameters.allowsDirectories
         panel.canChooseDirectories = parameters.allowsDirectories
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
-        panel.prompt = "Add Tracks"
+        panel.prompt = parameters.allowsDirectories ? "Import Audio" : "Add Tracks"
+        panel.message = parameters.allowsDirectories
+            ? "Choose a folder containing audio tracks."
+            : "Choose audio tracks to add to your mix."
 
         guard panel.runModal() == .OK else {
             completionHandler(nil)
             return
         }
-        completionHandler(panel.urls)
+
+        guard parameters.allowsDirectories else {
+            completionHandler(panel.urls)
+            return
+        }
+
+        let audioExtensions: Set<String> = [
+            "aac", "aif", "aiff", "alac", "caf", "flac", "m4a",
+            "mp3", "oga", "ogg", "opus", "wav", "wave",
+        ]
+        let files = panel.urls.flatMap { directory in
+            FileManager.default.enumerator(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )?.compactMap { entry -> URL? in
+                guard let url = entry as? URL,
+                      audioExtensions.contains(url.pathExtension.lowercased()),
+                      (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                    return nil
+                }
+                return url
+            } ?? []
+        }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        completionHandler(files)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
