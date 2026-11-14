@@ -75,6 +75,16 @@
           <div class="empty-note" id="empty-note"><span class="empty-wave">〰</span><span>Your crate is waiting.<br>Add at least two tracks to start mixing.</span></div>
         </section>
 
+        <dialog class="folder-browser" id="folder-browser" aria-labelledby="folder-browser-title">
+          <div class="folder-browser-header">
+            <div><div class="eyebrow">TRACK LIBRARY</div><h2 id="folder-browser-title">Tracks in this folder</h2><p id="folder-browser-summary">Choose tracks to add to your crate.</p></div>
+            <button class="icon-button" id="folder-browser-close" type="button" aria-label="Close folder browser">×</button>
+          </div>
+          <div class="folder-browser-toolbar"><label><input id="folder-select-all" type="checkbox" checked> Select all</label><span id="folder-selection-count"></span></div>
+          <div class="folder-browser-list" id="folder-browser-list"></div>
+          <div class="folder-browser-footer"><button class="text-button" id="folder-browser-cancel" type="button">Cancel</button><button class="folder-import-confirm" id="folder-import-confirm" type="button">Add selected tracks <span>↗</span></button></div>
+        </dialog>
+
         <section class="mix-section">
           <div class="section-heading mix-heading">
             <div><div class="eyebrow">02 <span class="eyebrow-line"></span> SHAPE THE SOUND</div><h2>Set the mood</h2></div>

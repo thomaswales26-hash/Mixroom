@@ -7,6 +7,14 @@
     folderInput: $("#folder-input"),
     browseFiles: $("#browse-files"),
     browseFolder: $("#browse-folder"),
+    folderBrowser: $("#folder-browser"),
+    folderBrowserClose: $("#folder-browser-close"),
+    folderBrowserCancel: $("#folder-browser-cancel"),
+    folderBrowserList: $("#folder-browser-list"),
+    folderBrowserSummary: $("#folder-browser-summary"),
+    folderSelectAll: $("#folder-select-all"),
+    folderSelectionCount: $("#folder-selection-count"),
+    folderImportConfirm: $("#folder-import-confirm"),
     dropzone: $("#dropzone"),
     trackList: $("#track-list"),
     emptyNote: $("#empty-note"),
@@ -60,6 +68,7 @@
     transitions: [],
     targetBpm: null,
     draggingId: null,
+    pendingFolderFiles: [],
   };
 
   function getAudioContext() {
@@ -400,8 +409,62 @@
     return { bpm: bestBpm, beatOffset };
   }
 
+  function isAudioFile(file) {
+    return file.type.startsWith("audio/") || /\.(mp3|wav|wave|m4a|aac|ogg|oga|flac|opus|aif|aiff|alac|caf)$/i.test(file.name);
+  }
+
+  function updateFolderSelection() {
+    const checkboxes = Array.from(elements.folderBrowserList.querySelectorAll('input[type="checkbox"]'));
+    const selected = checkboxes.filter((checkbox) => checkbox.checked);
+    elements.folderSelectAll.checked = checkboxes.length > 0 && selected.length === checkboxes.length;
+    elements.folderSelectAll.indeterminate = selected.length > 0 && selected.length < checkboxes.length;
+    elements.folderSelectionCount.textContent = `${selected.length} of ${checkboxes.length} selected`;
+    elements.folderImportConfirm.disabled = selected.length === 0;
+  }
+
+  function showFolderBrowser(files) {
+    const audioFiles = Array.from(files).filter(isAudioFile);
+    if (!audioFiles.length) {
+      showStatus("No supported audio tracks found in that folder.", true);
+      return;
+    }
+
+    state.pendingFolderFiles = audioFiles;
+    elements.folderBrowserList.replaceChildren();
+    audioFiles.forEach((file, index) => {
+      const row = document.createElement("label");
+      row.className = "folder-file-row";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = true;
+      checkbox.dataset.index = String(index);
+      checkbox.addEventListener("change", updateFolderSelection);
+      const info = document.createElement("span");
+      info.className = "folder-file-info";
+      const name = document.createElement("span");
+      name.className = "folder-file-name";
+      name.textContent = file.name;
+      name.title = file.name;
+      const path = document.createElement("span");
+      path.className = "folder-file-path";
+      path.textContent = file.webkitRelativePath || file.name;
+      info.append(name, path);
+      const size = document.createElement("span");
+      size.className = "folder-file-size";
+      size.textContent = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+      row.append(checkbox, info, size);
+      elements.folderBrowserList.append(row);
+    });
+
+    elements.folderBrowserSummary.textContent = `${audioFiles.length} audio ${audioFiles.length === 1 ? "track" : "tracks"} found. Choose which ones to add.`;
+    elements.folderBrowser.setAttribute("aria-label", `Folder contains ${audioFiles.length} audio tracks`);
+    elements.folderSelectAll.checked = true;
+    updateFolderSelection();
+    elements.folderBrowser.showModal();
+  }
+
   async function addFiles(files, source = "file") {
-    const audioFiles = Array.from(files).filter((file) => file.type.startsWith("audio/") || /\.(mp3|wav|wave|m4a|aac|ogg|oga|flac|opus|aif|aiff|alac|caf)$/i.test(file.name));
+    const audioFiles = Array.from(files).filter(isAudioFile);
     if (!audioFiles.length) {
       showStatus(source === "folder"
         ? "No supported audio tracks found in that folder."
@@ -876,9 +939,25 @@
   }
 
   elements.fileInput.addEventListener("change", (event) => addFiles(event.target.files));
-  elements.folderInput.addEventListener("change", (event) => addFiles(event.target.files, "folder"));
+  elements.folderInput.addEventListener("change", (event) => showFolderBrowser(event.target.files));
   elements.browseFiles.addEventListener("click", () => elements.fileInput.click());
   elements.browseFolder.addEventListener("click", () => elements.folderInput.click());
+  elements.folderSelectAll.addEventListener("change", () => {
+    elements.folderBrowserList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+      checkbox.checked = elements.folderSelectAll.checked;
+    });
+    updateFolderSelection();
+  });
+  elements.folderBrowserClose.addEventListener("click", () => elements.folderBrowser.close());
+  elements.folderBrowserCancel.addEventListener("click", () => elements.folderBrowser.close());
+  elements.folderImportConfirm.addEventListener("click", () => {
+    const selectedFiles = Array.from(elements.folderBrowserList.querySelectorAll('input[type="checkbox"]:checked'))
+      .map((checkbox) => state.pendingFolderFiles[Number(checkbox.dataset.index)])
+      .filter(Boolean);
+    elements.folderBrowser.close();
+    state.pendingFolderFiles = [];
+    addFiles(selectedFiles, "folder");
+  });
   elements.dropzone.addEventListener("dragover", (event) => {
     event.preventDefault();
     elements.dropzone.classList.add("drag-over");
