@@ -12,6 +12,7 @@
     folderBrowserCancel: $("#folder-browser-cancel"),
     folderBrowserList: $("#folder-browser-list"),
     folderBrowserSummary: $("#folder-browser-summary"),
+    folderBrowserStatus: $("#folder-browser-status"),
     folderSelectAll: $("#folder-select-all"),
     folderSelectionCount: $("#folder-selection-count"),
     folderImportConfirm: $("#folder-import-confirm"),
@@ -90,6 +91,16 @@
     elements.status.hidden = !message;
     elements.status.textContent = message;
     elements.status.classList.toggle("error", isError);
+  }
+
+  function showImportStatus(message, isError = false) {
+    if (elements.folderBrowser.open) {
+      elements.folderBrowserStatus.hidden = !message;
+      elements.folderBrowserStatus.textContent = message;
+      elements.folderBrowserStatus.classList.toggle("error", isError);
+      return;
+    }
+    showStatus(message, isError);
   }
 
   function getTargetBpm() {
@@ -431,6 +442,8 @@
 
     state.pendingFolderFiles = audioFiles;
     elements.folderBrowserList.replaceChildren();
+    elements.folderBrowserStatus.hidden = true;
+    elements.folderBrowserStatus.classList.remove("error");
     audioFiles.forEach((file, index) => {
       const row = document.createElement("label");
       row.className = "folder-file-row";
@@ -464,9 +477,10 @@
   }
 
   async function addFiles(files, source = "file") {
+    const report = source === "folder" ? showImportStatus : showStatus;
     const audioFiles = Array.from(files).filter(isAudioFile);
     if (!audioFiles.length) {
-      showStatus(source === "folder"
+      report(source === "folder"
         ? "No supported audio tracks found in that folder."
         : "Choose audio files such as MP3, WAV, M4A, OGG, or FLAC.", true);
       return;
@@ -475,17 +489,19 @@
     const existing = new Set(state.tracks.map((track) => `${track.sourcePath}:${track.size}`));
     const candidates = audioFiles.filter((file) => !existing.has(fileIdentity(file)));
     if (!candidates.length) {
-      showStatus("Those tracks are already in your crate.", true);
+      report("Those tracks are already in your crate.", true);
       return;
     }
     stopPlayback();
-    showStatus(`Analyzing ${candidates.length} ${candidates.length === 1 ? "track" : "tracks"} in your browser…`);
+    report(`Analyzing ${candidates.length} ${candidates.length === 1 ? "track" : "tracks"}…`);
     elements.fileInput.disabled = true;
     elements.folderInput.disabled = true;
     try {
       const context = getAudioContext();
       const failures = [];
-      for (const file of candidates) {
+      for (const [index, file] of candidates.entries()) {
+        report(`Analyzing track ${index + 1} of ${candidates.length}: ${file.name}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
         try {
           const arrayBuffer = await file.arrayBuffer();
           const buffer = await context.decodeAudioData(arrayBuffer);
@@ -512,13 +528,19 @@
       if (failures.length) {
         const names = failures.slice(0, 3).join(", ");
         const more = failures.length > 3 ? ` and ${failures.length - 3} more` : "";
-        showStatus(`Imported ${candidates.length - failures.length} of ${candidates.length} tracks. Could not read: ${names}${more}.`, true);
+        report(`Added ${candidates.length - failures.length} of ${candidates.length} tracks. Could not read: ${names}${more}.`, true);
       } else {
-        showStatus(`Imported ${candidates.length} ${candidates.length === 1 ? "track" : "tracks"} successfully.`);
+        report(`Added ${candidates.length} ${candidates.length === 1 ? "track" : "tracks"} to your crate.`);
+      }
+      if (source === "folder") {
+        elements.folderBrowserList.querySelectorAll('input[type="checkbox"]:checked').forEach((checkbox) => {
+          checkbox.checked = false;
+        });
+        updateFolderSelection();
       }
       updateMix();
     } catch (error) {
-      showStatus(error.message || "Something went wrong while loading your tracks.", true);
+      report(error.message || "Something went wrong while loading your tracks.", true);
       updateMix();
     } finally {
       elements.fileInput.disabled = false;
@@ -962,8 +984,6 @@
     const selectedFiles = Array.from(elements.folderBrowserList.querySelectorAll('input[type="checkbox"]:checked'))
       .map((checkbox) => state.pendingFolderFiles[Number(checkbox.dataset.index)])
       .filter(Boolean);
-    elements.folderBrowser.close();
-    state.pendingFolderFiles = [];
     addFiles(selectedFiles, "folder");
   });
   elements.dropzone.addEventListener("dragover", (event) => {
