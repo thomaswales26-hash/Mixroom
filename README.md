@@ -20,7 +20,7 @@ On macOS with the Xcode Command Line Tools installed, run:
 ./scripts/build-macos.sh
 ```
 
-This builds a universal Apple Silicon and Intel `Mixroom.app` and creates `Mixroom-1.0.0-macOS.pkg` in the project directory. Install the package to add Mixroom to `/Applications`. The app is ad-hoc signed; the installer is unsigned, and neither is Developer ID signed or notarized. macOS may require you to confirm or override its security warning before installation or first launch.
+This builds a universal Apple Silicon and Intel `Mixroom.app` and creates `Mixroom-1.0.1-macOS.pkg` in the project directory. Install the package to add Mixroom to `/Applications`. The app is ad-hoc signed; the installer is unsigned, and neither is Developer ID signed or notarized. macOS may require you to confirm or override its security warning before installation or first launch.
 
 Prebuilt installers are available on the [GitHub Releases page](https://github.com/thomaswales26-hash/Mixroom/releases).
 

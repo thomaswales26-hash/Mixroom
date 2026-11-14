@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let webView = WKWebView(frame: .zero)
         webView.autoresizingMask = [.width, .height]
+        webView.uiDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         window.contentView = webView
 
@@ -32,6 +33,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.makeKeyAndOrderFront(nil)
         self.window = window
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.prompt = "Add Tracks"
+
+        guard panel.runModal() == .OK else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(panel.urls)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
