@@ -935,9 +935,9 @@
       const link = document.createElement("a");
       link.href = url;
       link.download = `mixroom-set-${new Date().toISOString().slice(0, 10)}.wav`;
+      showStatus(`WAV ready · ${(blob.size / (1024 * 1024)).toFixed(1)} MB · starting download…`);
       link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showStatus(`WAV exported · ${(blob.size / (1024 * 1024)).toFixed(1)} MB · ${formatTime(state.duration)}.`);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       showStatus(error.message || "Could not render the WAV. Try a shorter set or another browser.", true);
     } finally {
@@ -1021,6 +1021,8 @@
     elements.settingsPanel.hidden = true;
     elements.settingsToggle.setAttribute("aria-expanded", "false");
   });
+  window.mixroomNativeDownloadFinished = () => showStatus("WAV saved to your Documents folder.");
+  window.mixroomNativeDownloadFailed = (message) => showStatus(message, true);
   window.addEventListener("resize", drawMixWaveform);
 
   updateMix();
